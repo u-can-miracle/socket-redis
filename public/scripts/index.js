@@ -64,10 +64,25 @@ function updateUserList(socketIds) {
 }
 
 const socket = io.connect("localhost:5100");
+// const socket = io.connect("localhost:5100/my-namespace");
 
 socket.on('enter', ({ msg }) => {
   console.log(msg)
 })
+
+socket.on('lesson-chat-ping', msg => {
+  console.log(msg)
+  setTimeout(() => {
+    socket.emit('lesson-chat-pong', 'pong')
+  }, 4000)
+})
+
+socket.on('lesson-chat-pong', msg => {
+  console.log('lesson-chat-pong', msg)
+  setTimeout(() => {
+    socket.emit('lesson-chat-ping', 'ping')
+  }, 4000);
+});
 
 socket.on("update-user-list", ({ users }) => {
   console.log('update-user-list', users)

@@ -19,6 +19,7 @@ export class Server {
   private readonly DEFAULT_PORT = 5100;
   private readonly REDIS_HOST = 'localhost';
   private readonly REDIS_PORT = 6379;
+  // private readonly NAME_SPACE = '/my-namespace';
 
   constructor() {
     this.initialize();
@@ -41,12 +42,6 @@ export class Server {
     // this.handleSocketConnection(this.ioNs);
   }
 
-  private getRoomByIndex(index: number): string {
-    const roomToJoin = index % 2 === 1 ? CONSULTATION : LESSON;
-
-    return roomToJoin
-  }
-
   private configureApp(): void {
     this.app.use(express.static(path.join(__dirname, "../public")));
   }
@@ -67,7 +62,19 @@ export class Server {
       if (!existingSocket) {
         this.sockets.push(socket);
 
-        const roomToJoin = this.getRoomByIndex(this.sockets.length)
+        let roomToJoin
+        let additionalRoom
+
+        const { length } = this.sockets;
+
+        if (length === 1) {
+          roomToJoin = CONSULTATION
+        } else if (length === 2) {
+          roomToJoin = LESSON
+        } else if (length === 3) {
+          roomToJoin = CONSULTATION
+          additionalRoom = LESSON
+        }
 
         socket.join(roomToJoin, () => {
           const users = this.sockets.filter(
@@ -89,6 +96,25 @@ export class Server {
             users: [socket.id],
           });
 
+          if (additionalRoom) {
+            socket.join(additionalRoom, () => {
+              socket.emit('lesson-chat-ping', 'ping')
+            });
+          }
+
+          const isLessonRoom = !!socket.rooms[LESSON];
+          if (isLessonRoom) {
+            socket.on('lesson-chat-pong', msg => {
+              console.log('lesson-chat-pong', msg)
+              socket.emit('lesson-chat-ping', 'ping')
+            });
+
+            socket.on('lesson-chat-ping', msg => {
+              console.log(msg)
+              socket.emit('lesson-chat-pong', 'pong')
+            })
+          }
+
           setTimeout(() => {
             const msg = `SocketId ${socket.id}, room ${roomToJoin}`
             io.emit('enter', { msg })
@@ -98,7 +124,8 @@ export class Server {
         })
       }
 
-      // socket.to(CONSULTATION).on('call-user', (data: any) => {
+      // socket.on('lesson-chat')
+
       socket.on('call-user', (data: any) => {
         socket.to(data.to).emit('call-made', {
           offer: data.offer,
@@ -106,7 +133,6 @@ export class Server {
         });
       });
 
-      // socket.to(CONSULTATION).on('make-answer', data => {
       socket.on('make-answer', data => {
         socket.to(data.to).emit('answer-made', {
           socket: socket.id,
@@ -114,7 +140,6 @@ export class Server {
         });
       });
 
-      // socket.to(CONSULTATION).on("reject-call", data => {
       socket.on("reject-call", data => {
         socket.to(data.from).emit("call-rejected", {
           socket: socket.id
