@@ -4,12 +4,17 @@ import redisAdapter from 'socket.io-redis';
 import { createServer, Server as HTTPServer } from "http";
 import path from "path";
 
+// ROOMS
+const CONSULTATION = 'CONSULTATION'
+const LESSON = 'LESSON'
+
 export class Server {
   private httpServer: HTTPServer;
   private app: Application;
   private io: SocketIOServer;
+  // private ioNs;
 
-  private activeSockets: string[] = [];
+  private sockets: any[] = [];
 
   private readonly DEFAULT_PORT = 5100;
   private readonly REDIS_HOST = 'localhost';
@@ -23,6 +28,7 @@ export class Server {
     this.app = express();
     this.httpServer = createServer(this.app);
     this.io = socketIO(this.httpServer);
+    // this.ioNs = this.io.of(this.NAME_SPACE);
 
     this.io.adapter(redisAdapter({
       host: this.REDIS_HOST,
@@ -31,7 +37,14 @@ export class Server {
 
     this.configureApp();
     this.configureRoutes();
-    this.handleSocketConnection();
+    this.handleSocketConnection(this.io);
+    // this.handleSocketConnection(this.ioNs);
+  }
+
+  private getRoomByIndex(index: number): string {
+    const roomToJoin = index % 2 === 1 ? CONSULTATION : LESSON;
+
+    return roomToJoin
   }
 
   private configureApp(): void {
@@ -44,40 +57,64 @@ export class Server {
     });
   }
 
-  private handleSocketConnection(): void {
-    this.io.on("connection", socket => {
-      const existingSocket = this.activeSockets.find(
-        existingSocket => existingSocket === socket.id
+  private handleSocketConnection(io): void {
+
+    io.on("connection", socket => {
+      const existingSocket = this.sockets.find(
+        existingSocket => existingSocket.id === socket.id
       );
 
       if (!existingSocket) {
-        this.activeSockets.push(socket.id);
+        this.sockets.push(socket);
 
-        socket.emit("update-user-list", {
-          users: this.activeSockets.filter(
-            existingSocket => existingSocket !== socket.id
-          )
-        });
+        const roomToJoin = this.getRoomByIndex(this.sockets.length)
 
-        socket.broadcast.emit("update-user-list", {
-          users: [socket.id]
-        });
+        socket.join(roomToJoin, () => {
+          const users = this.sockets.filter(
+            existingSocket => {
+              const isNotThis = existingSocket.id !== socket.id;
+              const isSameRoom = !!existingSocket.rooms[roomToJoin]
+
+              return isNotThis && isSameRoom
+            }
+          ).map(({ id }) => id)
+
+          console.log('users', users)
+
+          socket.emit("update-user-list", {
+            users,
+          });
+
+          socket.broadcast.to(roomToJoin).emit("update-user-list", {
+            users: [socket.id],
+          });
+
+          setTimeout(() => {
+            const msg = `SocketId ${socket.id}, room ${roomToJoin}`
+            io.emit('enter', { msg })
+
+            console.log('this.sockets', this.sockets.map(({ id }) => id))
+          }, 1000)
+        })
       }
 
-      socket.on("call-user", (data: any) => {
-        socket.to(data.to).emit("call-made", {
+      // socket.to(CONSULTATION).on('call-user', (data: any) => {
+      socket.on('call-user', (data: any) => {
+        socket.to(data.to).emit('call-made', {
           offer: data.offer,
           socket: socket.id
         });
       });
 
-      socket.on("make-answer", data => {
-        socket.to(data.to).emit("answer-made", {
+      // socket.to(CONSULTATION).on('make-answer', data => {
+      socket.on('make-answer', data => {
+        socket.to(data.to).emit('answer-made', {
           socket: socket.id,
           answer: data.answer
         });
       });
 
+      // socket.to(CONSULTATION).on("reject-call", data => {
       socket.on("reject-call", data => {
         socket.to(data.from).emit("call-rejected", {
           socket: socket.id
@@ -85,8 +122,8 @@ export class Server {
       });
 
       socket.on("disconnect", () => {
-        this.activeSockets = this.activeSockets.filter(
-          existingSocket => existingSocket !== socket.id
+        this.sockets = this.sockets.filter(
+          existingSocket => existingSocket.id !== socket.id
         );
         socket.broadcast.emit("remove-user", {
           socketId: socket.id

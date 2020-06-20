@@ -63,9 +63,14 @@ function updateUserList(socketIds) {
   });
 }
 
-const socket = io.connect("localhost:5000");
+const socket = io.connect("localhost:5100");
+
+socket.on('enter', ({ msg }) => {
+  console.log(msg)
+})
 
 socket.on("update-user-list", ({ users }) => {
+  console.log('update-user-list', users)
   updateUserList(users);
 });
 
