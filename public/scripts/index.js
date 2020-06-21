@@ -71,17 +71,13 @@ socket.on('enter', ({ msg }) => {
 })
 
 socket.on('lesson-chat-ping', msg => {
-  console.log(msg)
-  setTimeout(() => {
-    socket.emit('lesson-chat-pong', 'pong')
-  }, 4000)
+  console.log('lesson-chat-ping', msg)
+  socket.emit('lesson-chat-pong', 'pong')
 })
 
 socket.on('lesson-chat-pong', msg => {
   console.log('lesson-chat-pong', msg)
-  setTimeout(() => {
-    socket.emit('lesson-chat-ping', 'ping')
-  }, 4000);
+  socket.emit('lesson-chat-ping', 'ping')
 });
 
 socket.on("update-user-list", ({ users }) => {

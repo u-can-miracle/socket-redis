@@ -8,6 +8,8 @@ import path from "path";
 const CONSULTATION = 'CONSULTATION'
 const LESSON = 'LESSON'
 
+const DELAY = 5000
+
 export class Server {
   private httpServer: HTTPServer;
   private app: Application;
@@ -52,19 +54,32 @@ export class Server {
     });
   }
 
-  private handleSocketConnection(io): void {
+  private pingPongSubscribe(socket) {
+    socket.on('lesson-chat-pong', msg => {
+      console.log('lesson-chat-pong', msg)
+      setTimeout(() => {
+        socket.broadcast.to(LESSON).emit('lesson-chat-ping', 'ping')
+      }, DELAY)
+    });
 
+    socket.on('lesson-chat-ping', msg => {
+      console.log('lesson-chat-ping', msg)
+      setTimeout(() => {
+        socket.broadcast.to(LESSON).emit('lesson-chat-pong', 'pong')
+      }, DELAY)
+    })
+  }
+
+  private handleSocketConnection(io) {
     io.on("connection", socket => {
       const existingSocket = this.sockets.find(
         existingSocket => existingSocket.id === socket.id
       );
+      let roomToJoin
+      let isThirdClient = false
 
       if (!existingSocket) {
         this.sockets.push(socket);
-
-        let roomToJoin
-        let additionalRoom
-
         const { length } = this.sockets;
 
         if (length === 1) {
@@ -73,7 +88,7 @@ export class Server {
           roomToJoin = LESSON
         } else if (length === 3) {
           roomToJoin = CONSULTATION
-          additionalRoom = LESSON
+          isThirdClient = true
         }
 
         socket.join(roomToJoin, () => {
@@ -96,35 +111,29 @@ export class Server {
             users: [socket.id],
           });
 
-          if (additionalRoom) {
-            socket.join(additionalRoom, () => {
-              socket.emit('lesson-chat-ping', 'ping')
-            });
+          const isSocketRelatedToLessonRoom = !!socket.rooms[LESSON];
+          if (isSocketRelatedToLessonRoom) {
+            this.pingPongSubscribe(socket)
           }
 
-          const isLessonRoom = !!socket.rooms[LESSON];
-          if (isLessonRoom) {
-            socket.on('lesson-chat-pong', msg => {
-              console.log('lesson-chat-pong', msg)
-              socket.emit('lesson-chat-ping', 'ping')
-            });
-
-            socket.on('lesson-chat-ping', msg => {
-              console.log(msg)
-              socket.emit('lesson-chat-pong', 'pong')
+          if (isThirdClient) {
+            socket.join(LESSON, () => {
+              this.pingPongSubscribe(socket)
+              console.log('lesson-chat-ping isThirdClient')
+              setTimeout(() => {
+                socket.broadcast.to(LESSON).emit('lesson-chat-ping', 'ping')
+              }, DELAY)
             })
           }
-
-          setTimeout(() => {
-            const msg = `SocketId ${socket.id}, room ${roomToJoin}`
-            io.emit('enter', { msg })
-
-            console.log('this.sockets', this.sockets.map(({ id }) => id))
-          }, 1000)
         })
-      }
 
-      // socket.on('lesson-chat')
+        setTimeout(() => {
+          const msg = `SocketId ${socket.id}, room ${roomToJoin}`
+          io.emit('enter', { msg })
+
+          console.log('this.sockets', this.sockets.map(({ id }) => id))
+        }, 1000)
+      }
 
       socket.on('call-user', (data: any) => {
         socket.to(data.to).emit('call-made', {
