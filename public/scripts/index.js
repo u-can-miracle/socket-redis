@@ -63,21 +63,18 @@ function updateUserList(socketIds) {
   });
 }
 
-const socket = io.connect("localhost:5100");
-// const socket = io.connect("localhost:5100/my-namespace");
+const NAME_SPACE = 'chat';
+const socket = io.connect('localhost:5100');
+const socketChat = io.connect(`localhost:5100/${NAME_SPACE}`);
 
-socket.on('enter', ({ msg }) => {
-  console.log(msg)
+socketChat.on('chat-ping', msg => {
+  console.log('chat-ping', msg)
+  socketChat.emit('chat-pong', 'pong')
 })
 
-socket.on('lesson-chat-ping', msg => {
-  console.log('lesson-chat-ping', msg)
-  socket.emit('lesson-chat-pong', 'pong')
-})
-
-socket.on('lesson-chat-pong', msg => {
-  console.log('lesson-chat-pong', msg)
-  socket.emit('lesson-chat-ping', 'ping')
+socketChat.on('chat-pong', msg => {
+  console.log('chat-pong', msg)
+  socketChat.emit('chat-ping', 'ping')
 });
 
 socket.on("update-user-list", ({ users }) => {

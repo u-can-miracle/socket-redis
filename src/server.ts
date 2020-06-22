@@ -5,8 +5,8 @@ import { createServer, Server as HTTPServer } from "http";
 import path from "path";
 
 // ROOMS
-const CONSULTATION = 'CONSULTATION'
-const LESSON = 'LESSON'
+// const CONSULTATION = 'CONSULTATION'
+// const LESSON = 'LESSON'
 
 const DELAY = 5000
 
@@ -14,14 +14,15 @@ export class Server {
   private httpServer: HTTPServer;
   private app: Application;
   private io: SocketIOServer;
-  // private ioNs;
+  private ioChat;
 
-  private sockets: any[] = [];
+  private socketsVideo: any[] = [];
+  private socketsChat: any[] = [];
 
   private readonly DEFAULT_PORT = 5100;
   private readonly REDIS_HOST = 'localhost';
   private readonly REDIS_PORT = 6379;
-  // private readonly NAME_SPACE = '/my-namespace';
+  private readonly NAME_SPACE = '/chat';
 
   constructor() {
     this.initialize();
@@ -31,7 +32,7 @@ export class Server {
     this.app = express();
     this.httpServer = createServer(this.app);
     this.io = socketIO(this.httpServer);
-    // this.ioNs = this.io.of(this.NAME_SPACE);
+    this.ioChat = this.io.of(this.NAME_SPACE);
 
     this.io.adapter(redisAdapter({
       host: this.REDIS_HOST,
@@ -40,8 +41,28 @@ export class Server {
 
     this.configureApp();
     this.configureRoutes();
-    this.handleSocketConnection(this.io);
-    // this.handleSocketConnection(this.ioNs);
+
+    this.io.on('connection', socket => {
+      this.socketsVideo.push(socket);
+
+      const { length } = this.socketsVideo
+
+      if (length === 1 || length === 3) {
+        console.log('handleSocketConnectionVideo')
+        this.handleSocketConnectionVideo(socket);
+      }
+    })
+
+    this.ioChat.on('connection', socket => {
+      this.socketsChat.push(socket);
+
+      const { length } = this.socketsChat
+
+      if (length === 2 || length === 3) {
+        console.log('handleSocketConnectionChat')
+        this.handleSocketConnectionChat(socket);
+      }
+    })
   }
 
   private configureApp(): void {
@@ -55,115 +76,80 @@ export class Server {
   }
 
   private pingPongSubscribe(socket) {
-    socket.on('lesson-chat-pong', msg => {
-      console.log('lesson-chat-pong', msg)
+    socket.on('chat-pong', msg => {
+      console.log('chat-pong', msg)
       setTimeout(() => {
-        socket.broadcast.to(LESSON).emit('lesson-chat-ping', 'ping')
+        socket.broadcast.emit('chat-ping', 'ping')
       }, DELAY)
     });
 
-    socket.on('lesson-chat-ping', msg => {
-      console.log('lesson-chat-ping', msg)
+    socket.on('chat-ping', msg => {
+      console.log('chat-ping', msg)
       setTimeout(() => {
-        socket.broadcast.to(LESSON).emit('lesson-chat-pong', 'pong')
+        socket.broadcast.emit('chat-pong', 'pong')
       }, DELAY)
     })
   }
 
-  private handleSocketConnection(io) {
-    io.on("connection", socket => {
-      const existingSocket = this.sockets.find(
-        existingSocket => existingSocket.id === socket.id
-      );
-      let roomToJoin
-      let isThirdClient = false
+  private handleSocketConnectionVideo(socket) {
+    const users = this.socketsVideo.filter(
+      existingSocket => {
+        const isNotThis = existingSocket.id !== socket.id;
+        const isVideoNameSpace = socket.nsp.name === '/'
 
-      if (!existingSocket) {
-        this.sockets.push(socket);
-        const { length } = this.sockets;
-
-        if (length === 1) {
-          roomToJoin = CONSULTATION
-        } else if (length === 2) {
-          roomToJoin = LESSON
-        } else if (length === 3) {
-          roomToJoin = CONSULTATION
-          isThirdClient = true
-        }
-
-        socket.join(roomToJoin, () => {
-          const users = this.sockets.filter(
-            existingSocket => {
-              const isNotThis = existingSocket.id !== socket.id;
-              const isSameRoom = !!existingSocket.rooms[roomToJoin]
-
-              return isNotThis && isSameRoom
-            }
-          ).map(({ id }) => id)
-
-          console.log('users', users)
-
-          socket.emit("update-user-list", {
-            users,
-          });
-
-          socket.broadcast.to(roomToJoin).emit("update-user-list", {
-            users: [socket.id],
-          });
-
-          const isSocketRelatedToLessonRoom = !!socket.rooms[LESSON];
-          if (isSocketRelatedToLessonRoom) {
-            this.pingPongSubscribe(socket)
-          }
-
-          if (isThirdClient) {
-            socket.join(LESSON, () => {
-              this.pingPongSubscribe(socket)
-              console.log('lesson-chat-ping isThirdClient')
-              setTimeout(() => {
-                socket.broadcast.to(LESSON).emit('lesson-chat-ping', 'ping')
-              }, DELAY)
-            })
-          }
-        })
-
-        setTimeout(() => {
-          const msg = `SocketId ${socket.id}, room ${roomToJoin}`
-          io.emit('enter', { msg })
-
-          console.log('this.sockets', this.sockets.map(({ id }) => id))
-        }, 1000)
+        return isNotThis && isVideoNameSpace
       }
+    ).map(({ id }) => id)
 
-      socket.on('call-user', (data: any) => {
-        socket.to(data.to).emit('call-made', {
-          offer: data.offer,
-          socket: socket.id
-        });
-      });
+    console.log('users', users)
 
-      socket.on('make-answer', data => {
-        socket.to(data.to).emit('answer-made', {
-          socket: socket.id,
-          answer: data.answer
-        });
-      });
+    socket.emit("update-user-list", {
+      users,
+    });
 
-      socket.on("reject-call", data => {
-        socket.to(data.from).emit("call-rejected", {
-          socket: socket.id
-        });
-      });
+    socket.broadcast.emit("update-user-list", {
+      users: [socket.id],
+    });
 
-      socket.on("disconnect", () => {
-        this.sockets = this.sockets.filter(
-          existingSocket => existingSocket.id !== socket.id
-        );
-        socket.broadcast.emit("remove-user", {
-          socketId: socket.id
-        });
+    socket.on('call-user', (data: any) => {
+      socket.to(data.to).emit('call-made', {
+        offer: data.offer,
+        socket: socket.id
       });
     });
+
+    socket.on('make-answer', data => {
+      socket.to(data.to).emit('answer-made', {
+        socket: socket.id,
+        answer: data.answer
+      });
+    });
+
+    socket.on("reject-call", data => {
+      socket.to(data.from).emit("call-rejected", {
+        socket: socket.id
+      });
+    });
+
+    socket.on("disconnect", () => {
+      this.socketsVideo = this.socketsVideo.filter(
+        existingSocket => existingSocket.id !== socket.id
+      );
+      socket.broadcast.emit("remove-user", {
+        socketId: socket.id
+      });
+    });
+  }
+
+  private handleSocketConnectionChat(socket) {
+    this.pingPongSubscribe(socket)
+
+    if (this.socketsChat.length === 3) {
+      console.log('emit chat-ping in 5 sec')
+      setTimeout(() => {
+        socket.broadcast.emit('chat-ping', 'ping')
+      }, DELAY)
+    }
   }
 
   public listen(callback: (port: number) => void): void {
